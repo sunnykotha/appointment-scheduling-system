@@ -1,5 +1,8 @@
 package com.example.appointments;
 
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -7,9 +10,16 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Objects;
 
+@Service
 public class BookingService {
 
+    @Autowired(required = false)
+    private PersistentBookingService persistentBookingService;
+
+
     private final List<Appointment> bookedAppointments = new ArrayList<>();
+    private final List<LeaveBlock> registeredLeaveBlocks = new ArrayList<>();
+    private final List<HolidayBlock> registeredHolidayBlocks = new ArrayList<>();
     private final Map<Patient, Integer> lateCancellationStrikes = new HashMap<>();
 
     public boolean canBook(Appointment candidate, List<Appointment> existing) {
@@ -22,16 +32,23 @@ public class BookingService {
             }
         }
 
+        if (exceedsClinicCapacity(candidate, existing)) {
+            return false;
+        }
+
         return true;
     }
 
     public synchronized boolean tryBook(Appointment candidate) {
         Objects.requireNonNull(candidate, "Candidate appointment is required");
 
-        if (!canBook(candidate, bookedAppointments)) {
+        if (!canBook(candidate, bookedAppointments) || registeredLeaveBlocks.stream().anyMatch(leave -> leave.blocks(candidate)) || registeredHolidayBlocks.stream().anyMatch(holiday -> holiday.blocks(candidate))) {
             return false;
         }
 
+        if (!persistIfManaged(candidate)) {
+            return false;
+        }
         bookedAppointments.add(candidate);
         return true;
     }
@@ -43,10 +60,13 @@ public class BookingService {
 
         Objects.requireNonNull(candidate, "Candidate appointment is required");
 
-        if (!canBook(candidate, bookedAppointments, holds, time)) {
+        if (!canBook(candidate, bookedAppointments, holds, time) || registeredLeaveBlocks.stream().anyMatch(leave -> leave.blocks(candidate)) || registeredHolidayBlocks.stream().anyMatch(holiday -> holiday.blocks(candidate))) {
             return false;
         }
 
+        if (!persistIfManaged(candidate)) {
+            return false;
+        }
         bookedAppointments.add(candidate);
         return true;
     }
@@ -61,7 +81,7 @@ public class BookingService {
         Objects.requireNonNull(leaveBlocks, "Leave blocks are required");
         Objects.requireNonNull(time, "Current time is required");
 
-        if (!canBook(candidate, bookedAppointments, holds, time)) {
+        if (!canBook(candidate, bookedAppointments, holds, time) || registeredLeaveBlocks.stream().anyMatch(leave -> leave.blocks(candidate)) || registeredHolidayBlocks.stream().anyMatch(holiday -> holiday.blocks(candidate))) {
             return false;
         }
 
@@ -71,8 +91,32 @@ public class BookingService {
             }
         }
 
+        if (!persistIfManaged(candidate)) {
+            return false;
+        }
         bookedAppointments.add(candidate);
         return true;
+    }
+    public synchronized List<Appointment> applyLeaveBlock(LeaveBlock leaveBlock) {
+        Objects.requireNonNull(leaveBlock, "Leave block is required");
+
+        if (!registeredLeaveBlocks.contains(leaveBlock)) {
+            registeredLeaveBlocks.add(leaveBlock);
+        }
+
+        List<Appointment> affected = new ArrayList<>();
+
+        for (int i = 0; i < bookedAppointments.size(); i++) {
+            Appointment appointment = bookedAppointments.get(i);
+
+            if (leaveBlock.blocks(appointment)) {
+                Appointment flagged = appointment.markForRescheduling();
+                bookedAppointments.set(i, flagged);
+                affected.add(flagged);
+            }
+        }
+
+        return List.copyOf(affected);
     }
     public synchronized List<Appointment> getBookedAppointments() {
         return List.copyOf(bookedAppointments);
@@ -86,6 +130,9 @@ public class BookingService {
 
             if (appointmentId.equals(appointment.id())
                     && !appointment.cancelled()) {
+                if (!cancelPersistedIfManaged(appointmentId)) {
+                    return false;
+                }
                 bookedAppointments.set(i, appointment.cancel());
                 return true;
             }
@@ -205,6 +252,26 @@ public class BookingService {
         return true;
     }
 
+    private boolean exceedsClinicCapacity(
+            Appointment candidate, List<Appointment> existing) {
+        Clinic clinic = candidate.clinic();
+
+        if (clinic == null) {
+            return false;
+        }
+
+        long appointmentsForClinicAndDay = existing.stream()
+                .filter(appointment -> !appointment.cancelled())
+                .filter(appointment -> appointment.clinic() != null)
+                .filter(appointment ->
+                        sameId(clinic.id(), appointment.clinic().id()))
+                .filter(appointment ->
+                        appointment.start().toLocalDate()
+                                .equals(candidate.start().toLocalDate()))
+                .count();
+
+        return appointmentsForClinicAndDay >= clinic.maximumDailyAppointments();
+    }
     private boolean conflictsWith(Appointment first, Appointment second) {
         return first.getReservedSlot().overlaps(second.getReservedSlot())
                 && (sameId(first.patient().id(), second.patient().id())
@@ -221,5 +288,21 @@ public class BookingService {
 
     private boolean sameId(Long first, Long second) {
         return first != null && first.equals(second);
+    }
+    public synchronized void applyHolidayBlock(HolidayBlock holidayBlock) {
+        java.util.Objects.requireNonNull(holidayBlock, "Holiday block is required");
+        registeredHolidayBlocks.add(holidayBlock);
+        if (persistentBookingService != null) {
+            persistentBookingService.registerHolidayBlock(holidayBlock);
+        }
+    }
+    private boolean persistIfManaged(Appointment candidate) {
+        return persistentBookingService == null
+                || persistentBookingService.tryBook(candidate);
+    }
+
+    private boolean cancelPersistedIfManaged(Long appointmentId) {
+        return persistentBookingService == null
+                || persistentBookingService.cancelBooking(appointmentId);
     }
 }

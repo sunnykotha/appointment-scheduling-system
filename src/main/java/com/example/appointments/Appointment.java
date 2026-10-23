@@ -16,97 +16,93 @@ public record Appointment(
         boolean cancelled,
         String recurrenceSeriesId,
         boolean reschedulingRequired,
-        ZonedDateTime zonedStart) {
+        ZonedDateTime zonedStart,
+        Clinic clinic) {
 
+    // Backward-compatible constructor matching the previous full signature.
     public Appointment(
-            Long id,
-            Patient patient,
-            Provider provider,
-            Room room,
-            Equipment equipment,
-            AppointmentType appointmentType,
-            LocalDateTime start,
-            int bufferMinutes) {
-        this(id, patient, provider, room, equipment, appointmentType,
-                start, bufferMinutes, false, null, false, null);
-    }
-
-    public Appointment(
-            Long id,
-            Patient patient,
-            Provider provider,
-            Room room,
-            Equipment equipment,
-            AppointmentType appointmentType,
-            LocalDateTime start,
-            int bufferMinutes,
-            boolean cancelled) {
-        this(id, patient, provider, room, equipment, appointmentType,
-                start, bufferMinutes, cancelled, null, false, null);
-    }
-
-    public Appointment(
-            Long id,
-            Patient patient,
-            Provider provider,
-            Room room,
-            Equipment equipment,
-            AppointmentType appointmentType,
-            LocalDateTime start,
-            int bufferMinutes,
-            boolean cancelled,
-            String recurrenceSeriesId) {
-        this(id, patient, provider, room, equipment, appointmentType,
-                start, bufferMinutes, cancelled, recurrenceSeriesId, false, null);
-    }
-
-    public Appointment(
-            Long id,
-            Patient patient,
-            Provider provider,
-            Room room,
-            Equipment equipment,
-            AppointmentType appointmentType,
-            LocalDateTime start,
-            int bufferMinutes,
-            boolean cancelled,
-            String recurrenceSeriesId,
-            boolean reschedulingRequired) {
+            Long id, Patient patient, Provider provider, Room room,
+            Equipment equipment, AppointmentType appointmentType,
+            LocalDateTime start, int bufferMinutes, boolean cancelled,
+            String recurrenceSeriesId, boolean reschedulingRequired,
+            ZonedDateTime zonedStart) {
         this(id, patient, provider, room, equipment, appointmentType,
                 start, bufferMinutes, cancelled, recurrenceSeriesId,
-                reschedulingRequired, null);
+                reschedulingRequired, zonedStart, null);
     }
 
     public Appointment(
-            Long id,
-            Patient patient,
-            Provider provider,
-            Room room,
-            Equipment equipment,
-            AppointmentType appointmentType,
-            ZonedDateTime zonedStart,
-            int bufferMinutes) {
+            Long id, Patient patient, Provider provider, Room room,
+            Equipment equipment, AppointmentType appointmentType,
+            LocalDateTime start, int bufferMinutes) {
+        this(id, patient, provider, room, equipment, appointmentType,
+                start, bufferMinutes, false, null, false, null, null);
+    }
+
+    public Appointment(
+            Long id, Patient patient, Provider provider, Room room,
+            Equipment equipment, AppointmentType appointmentType,
+            LocalDateTime start, int bufferMinutes, boolean cancelled) {
+        this(id, patient, provider, room, equipment, appointmentType,
+                start, bufferMinutes, cancelled, null, false, null, null);
+    }
+
+    public Appointment(
+            Long id, Patient patient, Provider provider, Room room,
+            Equipment equipment, AppointmentType appointmentType,
+            LocalDateTime start, int bufferMinutes, boolean cancelled,
+            String recurrenceSeriesId) {
+        this(id, patient, provider, room, equipment, appointmentType,
+                start, bufferMinutes, cancelled, recurrenceSeriesId,
+                false, null, null);
+    }
+
+    public Appointment(
+            Long id, Patient patient, Provider provider, Room room,
+            Equipment equipment, AppointmentType appointmentType,
+            LocalDateTime start, int bufferMinutes, boolean cancelled,
+            String recurrenceSeriesId, boolean reschedulingRequired) {
+        this(id, patient, provider, room, equipment, appointmentType,
+                start, bufferMinutes, cancelled, recurrenceSeriesId,
+                reschedulingRequired, null, null);
+    }
+
+    public Appointment(
+            Long id, Patient patient, Provider provider, Room room,
+            Equipment equipment, AppointmentType appointmentType,
+            LocalDateTime start, int bufferMinutes, Clinic clinic) {
+        this(id, patient, provider, room, equipment, appointmentType,
+                start, bufferMinutes, false, null, false, null, clinic);
+    }
+
+    public Appointment(
+            Long id, Patient patient, Provider provider, Room room,
+            Equipment equipment, AppointmentType appointmentType,
+            ZonedDateTime zonedStart, int bufferMinutes) {
         this(id, patient, provider, room, equipment, appointmentType,
                 requireZonedStart(zonedStart).toLocalDateTime(),
-                bufferMinutes, false, null, false, zonedStart);
+                bufferMinutes, false, null, false, zonedStart, null);
     }
 
     public Appointment(
-            Long id,
-            Patient patient,
-            Provider provider,
-            Room room,
-            Equipment equipment,
-            AppointmentType appointmentType,
-            ZonedDateTime zonedStart,
-            int bufferMinutes,
-            boolean cancelled,
-            String recurrenceSeriesId,
+            Long id, Patient patient, Provider provider, Room room,
+            Equipment equipment, AppointmentType appointmentType,
+            ZonedDateTime zonedStart, int bufferMinutes,
+            boolean cancelled, String recurrenceSeriesId,
             boolean reschedulingRequired) {
         this(id, patient, provider, room, equipment, appointmentType,
                 requireZonedStart(zonedStart).toLocalDateTime(),
                 bufferMinutes, cancelled, recurrenceSeriesId,
-                reschedulingRequired, zonedStart);
+                reschedulingRequired, zonedStart, null);
+    }
+
+    public Appointment(
+            Long id, Patient patient, Provider provider, Room room,
+            Equipment equipment, AppointmentType appointmentType,
+            ZonedDateTime zonedStart, int bufferMinutes, Clinic clinic) {
+        this(id, patient, provider, room, equipment, appointmentType,
+                requireZonedStart(zonedStart).toLocalDateTime(),
+                bufferMinutes, false, null, false, zonedStart, clinic);
     }
 
     public Appointment {
@@ -165,15 +161,15 @@ public record Appointment(
 
     public Appointment cancel() {
         return new Appointment(
-                id, patient, provider, room, equipment,
-                appointmentType, start, bufferMinutes,
-                true, recurrenceSeriesId, reschedulingRequired, zonedStart);
+                id, patient, provider, room, equipment, appointmentType,
+                start, bufferMinutes, true, recurrenceSeriesId,
+                reschedulingRequired, zonedStart, clinic);
     }
 
     public Appointment markForRescheduling() {
         return new Appointment(
-                id, patient, provider, room, equipment,
-                appointmentType, start, bufferMinutes,
-                cancelled, recurrenceSeriesId, true, zonedStart);
+                id, patient, provider, room, equipment, appointmentType,
+                start, bufferMinutes, cancelled, recurrenceSeriesId,
+                true, zonedStart, clinic);
     }
 }

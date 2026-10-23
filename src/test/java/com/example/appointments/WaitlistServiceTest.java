@@ -69,6 +69,18 @@ class WaitlistServiceTest {
     }
 
     @Test
+    void skipsEntriesThatDoNotAcceptMorningSlots() {
+        WaitlistEntry morningUnavailable =
+                new WaitlistEntry(1L, patient1, followUp, 5, tenAm, false);
+        WaitlistEntry morningAvailable =
+                new WaitlistEntry(2L, patient2, followUp, 2, tenAm, true);
+
+        assertEquals(
+                Optional.of(morningAvailable),
+                waitlistService.selectNext(
+                        followUp, tenAm, List.of(morningUnavailable, morningAvailable)));
+    }
+    @Test
     void cancellationCreatesHoldForHighestPriorityMatchingEntry() {
         var start = java.time.LocalDateTime.of(2026, 10, 23, 10, 0);
         var cancelledAt = start.minusHours(1);
@@ -314,7 +326,35 @@ class WaitlistServiceTest {
                 tenAm.plusMinutes(5)).size());
     }
     @Test
-    void assignedPatientCanReleaseHold() {
+    void expiredHoldIsOfferedToNextEligibleWaitlistEntry() {
+        LocalDateTime cancelledAt = LocalDateTime.now().minusMinutes(30);
+        Provider provider = new Provider(1L, "Dr Rao", "Cardiology");
+        Room room = new Room(1L, "Room 1");
+
+        Appointment cancelled = new Appointment(
+                50L, patient1, provider, room, null, followUp, tenAm, 5).cancel();
+
+        WaitlistEntry first = new WaitlistEntry(
+                31L, patient1, followUp, 5, cancelledAt);
+        WaitlistEntry second = new WaitlistEntry(
+                32L, patient2, followUp, 3, cancelledAt.plusMinutes(1));
+        WaitlistEntry third = new WaitlistEntry(
+                33L, new Patient(3L, "Patient Three"), followUp,
+                1, cancelledAt.plusMinutes(2));
+
+        WaitlistService service = new WaitlistService();
+        WaitlistHold initial = service.handleCancellation(
+                cancelled, List.of(first, second, third), cancelledAt).orElseThrow();
+
+        assertEquals(first, initial.entry());
+
+        service.expireHolds();
+
+        List<WaitlistHold> active = service.getActiveHoldsAt(LocalDateTime.now());
+        assertEquals(1, active.size());
+        assertEquals(second, active.get(0).entry());
+    }
+void assignedPatientCanReleaseHold() {
         WaitlistEntry entry =
                 new WaitlistEntry(10L, patient1, followUp, 2, tenAm);
 

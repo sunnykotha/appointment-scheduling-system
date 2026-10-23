@@ -7,6 +7,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -16,17 +18,29 @@ public class WaitlistService {
     private static final long HOLD_MINUTES = 15;
 
     private final List<WaitlistHold> activeHolds = new ArrayList<>();
+    private final Map<WaitlistHold, List<WaitlistEntry>> waitingCandidatesByHold = new HashMap<>();
 
     public Optional<WaitlistEntry> selectNext(
             AppointmentType appointmentType,
+            List<WaitlistEntry> entries) {
+        return selectNext(appointmentType, null, entries);
+    }
+
+    public Optional<WaitlistEntry> selectNext(
+            AppointmentType appointmentType,
+            LocalDateTime slotStart,
             List<WaitlistEntry> entries) {
 
         Objects.requireNonNull(appointmentType, "Appointment type is required");
         Objects.requireNonNull(entries, "Waitlist entries are required");
 
+        boolean morningSlot = slotStart != null
+                && slotStart.toLocalTime().isBefore(java.time.LocalTime.NOON);
+
         return entries.stream()
                 .filter(entry -> sameId(
                         entry.appointmentType().id(), appointmentType.id()))
+                .filter(entry -> !morningSlot || entry.acceptsMornings())
                 .sorted(
                         Comparator.comparingInt(WaitlistEntry::urgency).reversed()
                                 .thenComparing(WaitlistEntry::addedAt))
@@ -49,7 +63,9 @@ public class WaitlistService {
         }
 
         Optional<WaitlistEntry> next = selectNext(
-                cancelledAppointment.appointmentType(), entries);
+                cancelledAppointment.appointmentType(),
+                cancelledAppointment.start(),
+                entries);
 
         if (next.isEmpty()) {
             return Optional.empty();
@@ -80,7 +96,15 @@ public class WaitlistService {
                     cancelledAppointment.bufferMinutes());
         }
 
-        return Optional.of(createHold(entry, heldAppointment, cancelledAt));
+        WaitlistHold hold = createHold(entry, heldAppointment, cancelledAt);
+        List<WaitlistEntry> remaining = entries.stream()
+                .filter(candidate -> candidate != entry
+                        && !sameId(candidate.id(), entry.id()))
+                .toList();
+        synchronized (activeHolds) {
+            waitingCandidatesByHold.put(hold, remaining);
+        }
+        return Optional.of(hold);
     }
 
     public WaitlistHold createHold(
@@ -112,7 +136,7 @@ public class WaitlistService {
         Objects.requireNonNull(time, "Current time is required");
 
         synchronized (activeHolds) {
-            activeHolds.removeIf(hold -> !hold.isActiveAt(time));
+            expireHoldsAt(time);
 
             return activeHolds.stream()
                     .anyMatch(hold ->
@@ -136,7 +160,7 @@ public class WaitlistService {
         Objects.requireNonNull(leaveBlocks, "Leave blocks are required");
 
         synchronized (activeHolds) {
-            activeHolds.removeIf(hold -> !hold.isActiveAt(time));
+            expireHoldsAt(time);
 
             for (WaitlistHold hold : activeHolds) {
                 if (sameId(hold.entry().id(), waitlistEntryId)
@@ -148,7 +172,7 @@ public class WaitlistService {
                         return false;
                     }
 
-                    if (!bookingService.tryBook(hold.appointment(), activeHolds, time)) {
+                    if (!bookingService.tryBook(hold.appointment(), activeHolds, leaveBlocks, time)) {
                         return false;
                     }
 
@@ -175,17 +199,67 @@ public class WaitlistService {
         Objects.requireNonNull(time, "Current time is required");
 
         synchronized (activeHolds) {
-            activeHolds.removeIf(hold -> !hold.isActiveAt(time));
+            expireHoldsAt(time);
             return List.copyOf(activeHolds);
         }
     }
 
     @Scheduled(fixedRate = 60000)
     public void expireHolds() {
-        LocalDateTime now = LocalDateTime.now();
+        expireHoldsAt(LocalDateTime.now());
+    }
+
+    public void expireHoldsAt(LocalDateTime now) {
+        Objects.requireNonNull(now, "Current time is required");
 
         synchronized (activeHolds) {
-            activeHolds.removeIf(hold -> !hold.isActiveAt(now));
+            List<WaitlistHold> expired = activeHolds.stream()
+                    .filter(hold -> !hold.isActiveAt(now))
+                    .toList();
+
+            for (WaitlistHold oldHold : expired) {
+                activeHolds.remove(oldHold);
+                List<WaitlistEntry> candidates =
+                        waitingCandidatesByHold.remove(oldHold);
+
+                if (candidates == null || candidates.isEmpty()) {
+                    continue;
+                }
+
+                Optional<WaitlistEntry> next = selectNext(
+                        oldHold.appointment().appointmentType(),
+                        oldHold.appointment().start(),
+                        candidates);
+
+                if (next.isEmpty()) {
+                    continue;
+                }
+
+                WaitlistEntry entry = next.get();
+                Appointment previous = oldHold.appointment();
+                Appointment replacement;
+
+                if (previous.zonedStart() != null) {
+                    replacement = new Appointment(
+                            null, entry.patient(), previous.provider(),
+                            previous.room(), previous.equipment(),
+                            previous.appointmentType(), previous.zonedStart(),
+                            previous.bufferMinutes());
+                } else {
+                    replacement = new Appointment(
+                            null, entry.patient(), previous.provider(),
+                            previous.room(), previous.equipment(),
+                            previous.appointmentType(), previous.start(),
+                            previous.bufferMinutes());
+                }
+
+                WaitlistHold nextHold = createHold(entry, replacement, now);
+                List<WaitlistEntry> remaining = candidates.stream()
+                        .filter(candidate -> candidate != entry
+                                && !sameId(candidate.id(), entry.id()))
+                        .toList();
+                waitingCandidatesByHold.put(nextHold, remaining);
+            }
         }
     }
 

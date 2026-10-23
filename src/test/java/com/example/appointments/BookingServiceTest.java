@@ -104,6 +104,17 @@ class BookingServiceTest {
     }
 
     @Test
+    void rejectsBookingOnRegisteredHoliday() {
+        bookingService.applyHolidayBlock(new HolidayBlock(tenAm.toLocalDate(), null));
+        assertFalse(bookingService.tryBook(appointmentAt(tenAm)));
+    }
+
+    @Test
+    void allowsBookingOutsideRegisteredHolidayDate() {
+        bookingService.applyHolidayBlock(new HolidayBlock(tenAm.toLocalDate(), null));
+        assertTrue(bookingService.tryBook(appointmentAt(tenAm.plusDays(1))));
+    }
+    @Test
     void cancelledAppointmentDoesNotBlockItsPreviousTimeSlot() {
         Appointment existing = appointmentAt(tenAm);
         Appointment cancelled = existing.cancel();
@@ -390,4 +401,71 @@ class BookingServiceTest {
                 tenAm.plusMinutes(1)));
 
         assertTrue(service.getBookedAppointments().isEmpty());
-    }}
+    }
+    @Test
+    void applyingProviderLeaveFlagsOnlyAffectedStoredAppointments() {
+        var service = new BookingService();
+
+        var affected = new Appointment(
+                601L, patient, provider, room, equipment,
+                followUp, tenAm, 5);
+
+        var otherProvider = new Provider(2L, "Dr Kumar", "Cardiology");
+        var unaffected = new Appointment(
+                602L, new Patient(2L, "Another Patient"),
+                otherProvider, new Room(2L, "Room 2"), null,
+                followUp, tenAm, 0);
+
+        assertTrue(service.tryBook(affected));
+        assertTrue(service.tryBook(unaffected));
+
+        var leave = new LeaveBlock(
+                1L, provider, tenAm.plusMinutes(10),
+                tenAm.plusHours(1), "Provider leave");
+
+        var flagged = service.applyLeaveBlock(leave);
+        var stored = service.getBookedAppointments();
+
+        assertEquals(1, flagged.size());
+        assertEquals(601L, flagged.get(0).id());
+        assertTrue(stored.stream()
+                .filter(a -> a.id().equals(601L))
+                .findFirst().orElseThrow().reschedulingRequired());
+        assertFalse(stored.stream()
+                .filter(a -> a.id().equals(602L))
+                .findFirst().orElseThrow().reschedulingRequired());
+    }
+
+    @Test
+    void leaveAwareBookingRejectsAppointmentDuringProviderLeave() {
+        var service = new BookingService();
+        var candidate = appointmentAt(tenAm);
+
+        var leave = new LeaveBlock(
+                701L, provider, tenAm.plusMinutes(10),
+                tenAm.plusHours(1), "Provider leave");
+
+        assertFalse(service.tryBook(
+                candidate,
+                List.of(),
+                List.of(leave),
+                tenAm.minusHours(1)));
+
+        assertTrue(service.getBookedAppointments().isEmpty());
+    }
+
+    @Test
+    void normalBookingRejectsAppointmentAfterProviderLeaveIsRegistered() {
+        var service = new BookingService();
+        var candidate = appointmentAt(tenAm);
+
+        var leave = new LeaveBlock(
+                702L, provider, tenAm.plusMinutes(10),
+                tenAm.plusHours(1), "Provider leave");
+
+        service.applyLeaveBlock(leave);
+
+        assertFalse(service.tryBook(candidate));
+        assertTrue(service.getBookedAppointments().isEmpty());
+    }
+}

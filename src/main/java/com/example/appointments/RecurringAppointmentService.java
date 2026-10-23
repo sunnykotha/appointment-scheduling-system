@@ -1,5 +1,7 @@
 package com.example.appointments;
 
+
+import org.springframework.beans.factory.annotation.Autowired;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.ZoneId;
@@ -11,9 +13,17 @@ import java.util.UUID;
 
 public class RecurringAppointmentService {
 
-    private final BookingService bookingService = new BookingService();
+    private final BookingService bookingService;
 
-    public List<Appointment> schedule(
+
+    public RecurringAppointmentService() {
+        this(new BookingService());
+    }
+
+    @Autowired
+    public RecurringAppointmentService(BookingService bookingService) {
+        this.bookingService = bookingService;
+    }public List<Appointment> schedule(
             Appointment template,
             int occurrenceCount,
             int intervalDays,
